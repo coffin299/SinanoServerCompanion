@@ -1,0 +1,9 @@
+# Virtual environment
+.venv/
+
+# Secrets (bot token)
+config.yaml
+
+# Python cache
+__pycache__/
+*.py[cod]
