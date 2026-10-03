@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from companion.grade import grade_number, grade_role_entry
+from companion.notify import plain_name
 from companion.panel import (
     DANGER_COLOUR,
     AdminPanel,
@@ -57,6 +58,9 @@ class GradeCog(commands.Cog):
         # 以後の進捗表示先として記憶する
         self.bot.remember_panel(message)
         await interaction.followup.send(view=notice_view("✅ パネルを設置しました。"), ephemeral=True)
+        await self.bot.notifier.admin_log(
+            [f"📌 {plain_name(interaction.user)} さんが {message.jump_url} に管理パネルを設置しました"]
+        )
 
     @app_commands.command(name="学年確認", description="サーバー参加日と学年を表示します")
     @app_commands.guild_only()

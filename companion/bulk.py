@@ -11,7 +11,7 @@ from datetime import datetime
 
 import discord
 
-from companion.roles import MemberPlan, apply_role_ids
+from companion.roles import MemberPlan, RoleChange, apply_role_ids
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +32,12 @@ class JobProgress:
     failed: int = 0
     cancelled: bool = False
     finished_at: datetime | None = None
+    # 実際に変更したメンバーの変更内容（終了後の通知に使う）
+    changes: list[RoleChange] = field(default_factory=list)
+
+    def summary(self) -> str:
+        """集計値を 1 行の文字列にする。"""
+        return f"変更 {self.changed} / 変更なし {self.unchanged} / 失敗 {self.failed}"
 
 
 class BulkRoleRunner:
@@ -127,18 +133,19 @@ class BulkRoleRunner:
     ) -> bool:
         """1 人分を処理し、API を呼び出したかどうかを返す。"""
         try:
-            changed = await apply_role_ids(member, plan(member), reason)
+            change = await apply_role_ids(member, plan(member), reason)
         except discord.HTTPException as exc:
             # 権限不足や退出済みなどは失敗として数えて続行する
             log.warning("ロール更新に失敗: %s (%s)", member, exc)
             progress.failed += 1
             return True
-        # 変更の有無で集計先を分ける
-        if changed:
-            progress.changed += 1
-        else:
+        # 変更が無ければ API を呼んでいない
+        if change is None:
             progress.unchanged += 1
-        return changed
+            return False
+        progress.changed += 1
+        progress.changes.append(change)
+        return True
 
     @staticmethod
     async def _notify(on_progress: ProgressCallback | None) -> None:

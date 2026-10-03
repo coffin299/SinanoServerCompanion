@@ -10,8 +10,8 @@ import discord
 
 from companion import actions
 from companion.actions import BulkAction
-from companion.bulk import JobProgress
 from companion.config import ConfigError, RoleEntry
+from companion.notify import plain_name
 from companion.roles import is_manageable
 
 if TYPE_CHECKING:
@@ -88,14 +88,6 @@ def _progress_bar(done: int, total: int) -> str:
     return "▰" * filled + "▱" * (PROGRESS_BAR_LENGTH - filled)
 
 
-def _format_counts(progress: JobProgress) -> str:
-    """集計値を 1 行の文字列にする。"""
-    return (
-        f"変更 {progress.changed} / 変更なし {progress.unchanged} / "
-        f"失敗 {progress.failed}"
-    )
-
-
 def _role_line(guild: discord.Guild | None, label: str, entry: RoleEntry) -> str:
     """ロール設定 1 件の表示行を作る（操作不可なら警告マーク付き）。"""
     # サーバー未取得または操作不可のロールには ⚠️ を付ける
@@ -130,7 +122,7 @@ def _status_text(bot: CompanionBot) -> str:
         bar = _progress_bar(current.processed, current.total)
         lines.append(f"🔄 **実行中: {current.title}**")
         lines.append(f"`{bar}` {current.processed} / {current.total} 人")
-        lines.append(_format_counts(current))
+        lines.append(current.summary())
     elif runner.busy:
         lines.append("⏳ メンバー一覧を取得中…")
     else:
@@ -140,7 +132,7 @@ def _status_text(bot: CompanionBot) -> str:
     if last is not None and last.finished_at is not None:
         result = "⛔ 中止" if last.cancelled else "✅ 完了"
         stamp = int(last.finished_at.timestamp())
-        lines.append(f"-# 前回: {last.title} {result} <t:{stamp}:R>（{_format_counts(last)}）")
+        lines.append(f"-# 前回: {last.title} {result} <t:{stamp}:R>（{last.summary()}）")
     return "\n".join(lines)
 
 
@@ -264,6 +256,10 @@ class AdminPanel(discord.ui.LayoutView):
             )
             return
         await interaction.response.edit_message(view=AdminPanel(self.bot))
+        # 応答を返した後で管理ログに残す（3 秒以内の応答期限を優先）
+        await self.bot.notifier.admin_log(
+            [f"⏹️ {plain_name(interaction.user)} さんが実行中の一括処理を中止しました"]
+        )
 
     async def _on_reload(self, interaction: discord.Interaction) -> None:
         """設定ファイルを読み直してパネルを描き直す。"""
@@ -278,6 +274,9 @@ class AdminPanel(discord.ui.LayoutView):
             )
             return
         await interaction.response.edit_message(view=AdminPanel(self.bot))
+        await self.bot.notifier.admin_log(
+            [f"♻️ {plain_name(interaction.user)} さんが設定を再読込しました"]
+        )
 
 
 class ConfirmView(discord.ui.LayoutView):
@@ -317,7 +316,7 @@ class ConfirmView(discord.ui.LayoutView):
         """一括処理を開始する。"""
         self.stop()
         # 実行枠を確保できたかで表示を変える
-        if self.bot.start_bulk(self.action):
+        if self.bot.start_bulk(self.action, actor=interaction.user):
             text = f"▶️ 「{self.action.title}」を開始しました。進捗はパネルに表示されます。"
         else:
             text = "⏳ 他の一括処理が実行中のため開始できませんでした。"

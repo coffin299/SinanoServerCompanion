@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 import discord
@@ -15,6 +16,15 @@ log = logging.getLogger(__name__)
 
 # メンバーを受け取り「最終的に持たせたいロール ID 集合」を返す関数
 MemberPlan = Callable[[discord.Member], set[int]]
+
+
+@dataclass(frozen=True)
+class RoleChange:
+    """1 人分のロール変更結果（通知の集計に使う）。"""
+
+    member: discord.Member
+    before: frozenset[int]
+    after: frozenset[int]
 
 
 def current_role_ids(member: discord.Member) -> set[int]:
@@ -71,11 +81,11 @@ def is_manageable(guild: discord.Guild, role_id: int) -> bool:
 
 async def apply_role_ids(
     member: discord.Member, target_ids: set[int], reason: str
-) -> bool:
+) -> RoleChange | None:
     """ロール集合を 1 回の API 呼び出しで適用する。変更が無ければ呼ばない。
 
     Returns:
-        API を呼び出した（変更があった）場合 True。
+        変更した場合はその内容、変更が無く API を呼ばなかった場合は None。
     """
     guild = member.guild
     current = current_role_ids(member)
@@ -84,10 +94,10 @@ async def apply_role_ids(
     to_remove = {rid for rid in current - target_ids if is_manageable(guild, rid)}
     # 差分が無ければ API を呼ばずに終了する（レート制限の節約）
     if not to_add and not to_remove:
-        return False
+        return None
     # 付け外しを 1 回の PATCH にまとめるため最終的なロール一覧を作る
     final_ids = (current | to_add) - to_remove
     roles = [role for rid in final_ids if (role := guild.get_role(rid)) is not None]
     await member.edit(roles=roles, reason=reason)
     log.debug("ロール更新: %s +%s -%s", member, to_add, to_remove)
-    return True
+    return RoleChange(member=member, before=frozenset(current), after=frozenset(final_ids))

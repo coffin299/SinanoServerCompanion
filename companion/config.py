@@ -17,6 +17,9 @@ KEY_GUILD_ID = "サーバーID"
 KEY_ALLOWED_USERS = "コマンドを使えるユーザーID"
 KEY_STATUS_TEXT = "カスタムステータス"
 KEY_PRESENCE = "オンライン状態"
+KEY_CELEBRATE_CHANNEL = "お祝い通知チャンネルID"
+KEY_LOG_CHANNEL = "管理ログチャンネルID"
+KEY_CELEBRATE_MESSAGE = "お祝いメッセージ"
 KEY_TIMEZONE = "タイムゾーン"
 KEY_IGNORE_BOTS = "Botを対象外にする"
 KEY_SYNC_HOURS = "定期同期間隔(時間)"
@@ -47,6 +50,10 @@ PRESENCE_MAP = {
 
 # カスタムステータスの最大文字数（Discord の上限）
 MAX_STATUS_LENGTH = 128
+
+# お祝いメッセージの既定文と、差し込める項目の検証用サンプル
+DEFAULT_CELEBRATE_MESSAGE = "🎉 祝！{name}さんが{grade}年生になりました！"
+CELEBRATE_SAMPLE = {"name": "名無し", "grade": 2, "role": "二年生"}
 
 
 class ConfigError(Exception):
@@ -91,6 +98,9 @@ class AppConfig:
     allowed_user_ids: frozenset[int]
     status_text: str
     presence: discord.Status
+    celebrate_channel_id: int | None
+    log_channel_id: int | None
+    celebrate_message: str
     timezone: ZoneInfo
     ignore_bots: bool
     sync_interval_hours: float
@@ -202,6 +212,28 @@ def _parse_presence(raw: dict[str, Any]) -> discord.Status:
     return PRESENCE_MAP[name]
 
 
+def _parse_optional_id(raw: dict[str, Any], key: str) -> int | None:
+    """任意の ID 設定を読み取る（未記入・0 なら無効として None）。"""
+    value = raw.get(key)
+    # 未記入・0・空文字は「使わない」を意味する
+    if value in (None, 0, "", "0"):
+        return None
+    return _parse_id(value, f"「{key}」")
+
+
+def _parse_celebrate_message(raw: dict[str, Any]) -> str:
+    """お祝いメッセージのテンプレートを読み取り、差し込み項目を検証する。"""
+    template = str(raw.get(KEY_CELEBRATE_MESSAGE) or DEFAULT_CELEBRATE_MESSAGE)
+    try:
+        # 未知の {項目} や括弧の閉じ忘れを起動時に検出する
+        template.format(**CELEBRATE_SAMPLE)
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ConfigError(
+            f"「{KEY_CELEBRATE_MESSAGE}」で使えるのは {{name}} {{grade}} {{role}} だけです: {exc}"
+        ) from exc
+    return template
+
+
 def _parse_timezone(raw: dict[str, Any]) -> ZoneInfo:
     """タイムゾーン名を ZoneInfo に変換する。"""
     name = str(raw.get(KEY_TIMEZONE, DEFAULT_TIMEZONE))
@@ -269,6 +301,9 @@ def load_config(path: Path) -> AppConfig:
         allowed_user_ids=_parse_allowed_users(raw),
         status_text=_parse_status_text(raw),
         presence=_parse_presence(raw),
+        celebrate_channel_id=_parse_optional_id(raw, KEY_CELEBRATE_CHANNEL),
+        log_channel_id=_parse_optional_id(raw, KEY_LOG_CHANNEL),
+        celebrate_message=_parse_celebrate_message(raw),
         timezone=_parse_timezone(raw),
         ignore_bots=ignore_bots,
         sync_interval_hours=_parse_number(raw, KEY_SYNC_HOURS, DEFAULT_SYNC_HOURS, 0),

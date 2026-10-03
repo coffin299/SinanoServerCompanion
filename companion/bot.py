@@ -14,8 +14,9 @@ from discord.ext import commands
 
 from companion import actions
 from companion.actions import BulkAction
-from companion.bulk import BulkRoleRunner
+from companion.bulk import BulkRoleRunner, JobProgress
 from companion.config import AppConfig, load_config
+from companion.notify import Notifier
 from companion.panel import AdminPanel
 from companion.roles import apply_role_ids, plan_join
 from companion.slash import GradeCog
@@ -52,6 +53,7 @@ class CompanionBot(commands.Bot):
         self.config = config
         self.config_path = config_path
         self.runner = BulkRoleRunner()
+        self.notifier = Notifier(self)
         # 進捗を反映するパネルメッセージ（最後に操作・設置されたもの）
         self._panel_message: discord.Message | None = None
         # 実行中タスクが GC されないよう参照を保持する
@@ -153,16 +155,22 @@ class CompanionBot(commands.Bot):
         guild = self.get_guild(self.config.guild_id)
         return len(self.target_members(guild)) if guild else 0
 
-    def start_bulk(self, action: BulkAction) -> bool:
-        """一括処理をバックグラウンドで開始する。実行中なら False。"""
+    def start_bulk(self, action: BulkAction, actor: discord.abc.User) -> bool:
+        """手動の一括処理をバックグラウンドで開始する。実行中なら False。"""
         # 同期的に実行枠を確保して二重実行を防ぐ
         if not self.runner.try_claim():
             return False
-        self._spawn(self._execute_claimed(action))
+        self._spawn(self._execute_claimed(action, actor))
         return True
 
-    async def _execute_claimed(self, action: BulkAction) -> None:
-        """確保済みの実行枠で一括処理を行い、最後に必ず解放する。"""
+    async def _execute_claimed(
+        self, action: BulkAction, actor: discord.abc.User | None = None
+    ) -> None:
+        """確保済みの実行枠で一括処理を行い、最後に必ず解放して通知する。
+
+        actor が None の場合は定期同期（時間経過による自動処理）として扱う。
+        """
+        progress: JobProgress | None = None
         try:
             guild = self.get_guild(self.config.guild_id)
             if guild is None:
@@ -174,7 +182,7 @@ class CompanionBot(commands.Bot):
                 await guild.chunk()
             # 開始時点の設定・時刻・メンバーで計画を固定する
             config = self.config
-            await self.runner.run(
+            progress = await self.runner.run(
                 title=action.title,
                 members=self.target_members(guild),
                 plan=action.make_plan(config, discord.utils.utcnow()),
@@ -187,6 +195,21 @@ class CompanionBot(commands.Bot):
             self.runner.release()
             # ボタンの有効状態を戻すため最終状態を描画する
             await self.refresh_panel()
+        # 通知は実行枠を解放してから送る（送信待ちで次の操作を妨げない）
+        if progress is not None:
+            await self._notify_job(progress, actor)
+
+    async def _notify_job(self, progress: JobProgress, actor: discord.abc.User | None) -> None:
+        """一括処理の結果を通知する。"""
+        # 手動操作は毎回、結果を管理ログに残す
+        if actor is not None:
+            await self.notifier.report_job(progress, actor)
+            return
+        # 時間経過で進級した人だけを個別にお祝いする
+        await self.notifier.celebrate(progress.changes)
+        # 定期同期は変更・失敗があったときだけ管理ログに残す（毎日の空報告を避ける）
+        if progress.changed or progress.failed:
+            await self.notifier.report_job(progress, None)
 
     async def refresh_panel(self) -> None:
         """記憶しているパネルを最新状態で描き直す。"""
