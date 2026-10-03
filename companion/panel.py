@@ -53,12 +53,11 @@ def notice_view(text: str, colour: discord.Colour = PANEL_COLOUR) -> discord.ui.
 
 
 async def check_permission(interaction: discord.Interaction) -> bool:
-    """ホワイトリスト外なら本人だけに通知して False を返す。"""
+    """ホワイトリスト外なら拒否メッセージを出して False を返す。"""
     if is_allowed_user(interaction):
         return True
     await interaction.response.send_message(
-        view=notice_view("⛔ この操作は許可されたユーザーのみ使えます。", DANGER_COLOUR),
-        ephemeral=True,
+        view=notice_view("⛔ この操作は許可されたユーザーのみ使えます。", DANGER_COLOUR)
     )
     return False
 
@@ -214,18 +213,16 @@ class AdminPanel(discord.ui.LayoutView):
         return await check_permission(interaction)
 
     async def _open_confirm(self, interaction: discord.Interaction, action: BulkAction) -> None:
-        """確認ダイアログ（本人のみ表示）を開く。"""
+        """確認ダイアログを開く。"""
         # 進捗表示先としてこのパネルを覚えておく
         self.bot.remember_panel(interaction.message)
         # 実行中なら確認を出さずに知らせる
         if self.bot.runner.busy:
             await interaction.response.send_message(
-                view=notice_view("⏳ 他の一括処理が実行中です。"), ephemeral=True
+                view=notice_view("⏳ 他の一括処理が実行中です。")
             )
             return
-        await interaction.response.send_message(
-            view=ConfirmView(self.bot, action), ephemeral=True
-        )
+        await interaction.response.send_message(view=ConfirmView(self.bot, action))
 
     async def _on_grade_sync(self, interaction: discord.Interaction) -> None:
         await self._open_confirm(interaction, actions.grade_sync_action())
@@ -242,17 +239,15 @@ class AdminPanel(discord.ui.LayoutView):
     async def _on_custom(self, interaction: discord.Interaction) -> None:
         """任意ロール選択ダイアログを開く。"""
         self.bot.remember_panel(interaction.message)
-        await interaction.response.send_message(
-            view=CustomRoleView(self.bot), ephemeral=True
-        )
+        await interaction.response.send_message(view=CustomRoleView(self.bot))
 
     async def _on_cancel(self, interaction: discord.Interaction) -> None:
         """実行中の一括処理を中止する。"""
         self.bot.remember_panel(interaction.message)
-        # 実行中でなければ本人に知らせるだけ
+        # 実行中でなければ知らせるだけ
         if not self.bot.runner.cancel():
             await interaction.response.send_message(
-                view=notice_view("実行中の処理はありません。"), ephemeral=True
+                view=notice_view("実行中の処理はありません。")
             )
             return
         await interaction.response.edit_message(view=AdminPanel(self.bot))
@@ -269,8 +264,7 @@ class AdminPanel(discord.ui.LayoutView):
         except ConfigError as exc:
             # 読み込み失敗時は旧設定のまま理由を表示する
             await interaction.response.send_message(
-                view=notice_view(f"❌ 設定の再読込に失敗しました。\n```\n{exc}\n```", DANGER_COLOUR),
-                ephemeral=True,
+                view=notice_view(f"❌ 設定の再読込に失敗しました。\n```\n{exc}\n```", DANGER_COLOUR)
             )
             return
         await interaction.response.edit_message(view=AdminPanel(self.bot))
@@ -374,7 +368,7 @@ class CustomRoleView(discord.ui.LayoutView):
         # 未選択なら案内だけ出す
         if not self.selected:
             await interaction.response.send_message(
-                view=notice_view("先にロールを選択してください。"), ephemeral=True
+                view=notice_view("先にロールを選択してください。")
             )
             return
         # Bot が操作できないロールが含まれていれば中断する
@@ -382,8 +376,7 @@ class CustomRoleView(discord.ui.LayoutView):
         if blocked:
             names = "、".join(role.mention for role in blocked)
             await interaction.response.send_message(
-                view=notice_view(f"⛔ Bot が操作できないロールがあります: {names}", DANGER_COLOUR),
-                ephemeral=True,
+                view=notice_view(f"⛔ Bot が操作できないロールがあります: {names}", DANGER_COLOUR)
             )
             return
         action = actions.custom_roles_action(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import discord
@@ -20,6 +21,8 @@ from companion.panel import (
 if TYPE_CHECKING:
     from companion.bot import CompanionBot
 
+log = logging.getLogger(__name__)
+
 
 class GradeCog(commands.Cog):
     """学年ロール関連のコマンド群。"""
@@ -30,37 +33,32 @@ class GradeCog(commands.Cog):
     @app_commands.command(name="学年パネル", description="学年ロール管理パネルをこのチャンネルに設置します")
     @app_commands.guild_only()
     async def panel(self, interaction: discord.Interaction) -> None:
-        """管理パネルを通常メッセージとして設置する。"""
+        """管理パネルをコマンドの応答として設置する。"""
         # ホワイトリスト外のユーザーは拒否する
         if not await check_permission(interaction):
             return
-        # チャンネル送信は時間がかかる場合があるので先に応答を保留する
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        channel = interaction.channel
-        # 送信できないチャンネル種別なら中断する
-        if not isinstance(channel, discord.abc.Messageable):
-            await interaction.followup.send(
-                view=notice_view("このチャンネルには設置できません。", DANGER_COLOUR), ephemeral=True
-            )
-            return
-        try:
-            # Bot トークンで編集できるよう Interaction 応答ではなく通常送信する
-            message = await channel.send(view=AdminPanel(self.bot))
-        except discord.HTTPException:
-            await interaction.followup.send(
-                view=notice_view(
-                    "パネルを送信できませんでした。Bot の閲覧・送信権限を確認してください。",
-                    DANGER_COLOUR,
-                ),
-                ephemeral=True,
-            )
-            return
+        # パネル自体を応答にして、余計な完了メッセージを出さない
+        await interaction.response.send_message(view=AdminPanel(self.bot))
+        message = await self._resolve_panel_message(interaction)
         # 以後の進捗表示先として記憶する
         self.bot.remember_panel(message)
-        await interaction.followup.send(view=notice_view("✅ パネルを設置しました。"), ephemeral=True)
         await self.bot.notifier.system_log(
             [f"📌 {plain_name(interaction.user)} さんが {message.jump_url} に管理パネルを設置しました"]
         )
+
+    @staticmethod
+    async def _resolve_panel_message(interaction: discord.Interaction) -> discord.Message:
+        """応答したパネルを、Bot トークンで編集できる通常メッセージとして取得する。"""
+        response = await interaction.original_response()
+        channel = interaction.channel
+        # 応答メッセージのままだと編集に 15 分の期限があるため、チャンネル経由で取得し直す
+        if isinstance(channel, discord.abc.Messageable):
+            try:
+                return await channel.fetch_message(response.id)
+            except discord.HTTPException as exc:
+                log.warning("パネルを取得し直せませんでした（15 分後に進捗更新が止まります）: %s", exc)
+        # 取得できなければ期限付きでも応答メッセージを使う
+        return response
 
     @app_commands.command(name="学年確認", description="サーバー参加日と学年を表示します")
     @app_commands.guild_only()
@@ -69,7 +67,7 @@ class GradeCog(commands.Cog):
     async def check(
         self, interaction: discord.Interaction, member: discord.Member | None = None
     ) -> None:
-        """指定メンバー（省略時は自分）の学年を本人だけに表示する。"""
+        """指定メンバー（省略時は自分）の学年を表示する。"""
         # ホワイトリスト外のユーザーは拒否する
         if not await check_permission(interaction):
             return
@@ -77,7 +75,7 @@ class GradeCog(commands.Cog):
         # サーバー外のユーザーは参加日が無いので対象外
         if not isinstance(target, discord.Member):
             await interaction.response.send_message(
-                view=notice_view("メンバー情報を取得できませんでした。", DANGER_COLOUR), ephemeral=True
+                view=notice_view("メンバー情報を取得できませんでした。", DANGER_COLOUR)
             )
             return
         config = self.bot.config
@@ -89,8 +87,8 @@ class GradeCog(commands.Cog):
         )
         role_text = f"<@&{entry.role_id}>" if entry else "（未設定）"
         text = (
-            f"### 🎓 {target.mention} は **{grade}年生**\n"
+            f"### 🎓 {plain_name(target)} さんは **{grade}年生**\n"
             f"参加日: {joined}\n"
             f"対応ロール: {role_text}"
         )
-        await interaction.response.send_message(view=notice_view(text), ephemeral=True)
+        await interaction.response.send_message(view=notice_view(text))
