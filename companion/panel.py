@@ -256,8 +256,8 @@ class AdminPanel(discord.ui.LayoutView):
             )
             return
         await interaction.response.edit_message(view=AdminPanel(self.bot))
-        # 応答を返した後で管理ログに残す（3 秒以内の応答期限を優先）
-        await self.bot.notifier.admin_log(
+        # 応答を返した後で一括操作ログに残す（3 秒以内の応答期限を優先）
+        await self.bot.notifier.bulk_log(
             [f"⏹️ {plain_name(interaction.user)} さんが実行中の一括処理を中止しました"]
         )
 
@@ -274,7 +274,7 @@ class AdminPanel(discord.ui.LayoutView):
             )
             return
         await interaction.response.edit_message(view=AdminPanel(self.bot))
-        await self.bot.notifier.admin_log(
+        await self.bot.notifier.system_log(
             [f"♻️ {plain_name(interaction.user)} さんが設定を再読込しました"]
         )
 

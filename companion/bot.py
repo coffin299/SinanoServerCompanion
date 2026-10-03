@@ -201,13 +201,13 @@ class CompanionBot(commands.Bot):
 
     async def _notify_job(self, progress: JobProgress, actor: discord.abc.User | None) -> None:
         """一括処理の結果を通知する。"""
-        # 手動操作は毎回、結果を管理ログに残す
+        # 手動操作は毎回、結果を一括操作ログに残す
         if actor is not None:
             await self.notifier.report_job(progress, actor)
             return
         # 時間経過で進級した人だけを個別にお祝いする
         await self.notifier.celebrate(progress.changes)
-        # 定期同期は変更・失敗があったときだけ管理ログに残す（毎日の空報告を避ける）
+        # 定期同期は変更・失敗があったときだけシステムログに残す（毎日の空報告を避ける）
         if progress.changed or progress.failed:
             await self.notifier.report_job(progress, None)
 

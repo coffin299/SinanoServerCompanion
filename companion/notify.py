@@ -1,4 +1,4 @@
-"""お祝い通知と管理ログの送信（メンションは一切飛ばさない）。"""
+"""お祝い通知・システムログ・一括操作ログの送信（メンションは一切飛ばさない）。"""
 
 from __future__ import annotations
 
@@ -126,9 +126,13 @@ class Notifier:
                 log.warning("通知の送信に失敗しました: %s", exc)
                 return
 
-    async def admin_log(self, lines: list[str]) -> None:
-        """管理ログチャンネルへ送る。"""
-        await self._send_lines(self.bot.config.log_channel_id, lines)
+    async def system_log(self, lines: list[str]) -> None:
+        """システムログチャンネル（設定再読込・定期同期など）へ送る。"""
+        await self._send_lines(self.bot.config.system_log_channel_id, lines)
+
+    async def bulk_log(self, lines: list[str]) -> None:
+        """一括操作ログチャンネル（手動の一括操作）へ送る。"""
+        await self._send_lines(self.bot.config.bulk_log_channel_id, lines)
 
     async def celebrate(self, changes: Iterable[RoleChange]) -> None:
         """進級した人ごとのお祝いをお祝い通知チャンネルへ送る。"""
@@ -144,7 +148,7 @@ class Notifier:
         await self._send_lines(config.celebrate_channel_id, lines)
 
     async def report_job(self, progress: JobProgress, actor: discord.abc.User | None) -> None:
-        """一括処理の結果を管理ログへ送る（実行者なしは定期同期）。"""
+        """一括処理の結果を送る（手動は一括操作ログ、実行者なしの定期同期はシステムログ）。"""
         header = (
             f"🛠️ {plain_name(actor)} さんが「{progress.title}」を実行しました"
             if actor is not None
@@ -157,4 +161,8 @@ class Notifier:
             f"・{count}人が{index + 1}年生になりました！"
             for index, count in count_new_grades(progress.changes, self.bot.config).items()
         ]
-        await self.admin_log(lines)
+        # 手動操作と定期同期で送信先を分ける
+        if actor is not None:
+            await self.bulk_log(lines)
+        else:
+            await self.system_log(lines)

@@ -18,7 +18,10 @@ KEY_ALLOWED_USERS = "コマンドを使えるユーザーID"
 KEY_STATUS_TEXT = "カスタムステータス"
 KEY_PRESENCE = "オンライン状態"
 KEY_CELEBRATE_CHANNEL = "お祝い通知チャンネルID"
-KEY_LOG_CHANNEL = "管理ログチャンネルID"
+KEY_SYSTEM_LOG_CHANNEL = "システムログチャンネルID"
+KEY_BULK_LOG_CHANNEL = "一括操作ログチャンネルID"
+# 旧バージョンの共通ログチャンネル（新キーが無いときの代替として読む）
+KEY_LEGACY_LOG_CHANNEL = "管理ログチャンネルID"
 KEY_CELEBRATE_MESSAGE = "お祝いメッセージ"
 KEY_TIMEZONE = "タイムゾーン"
 KEY_IGNORE_BOTS = "Botを対象外にする"
@@ -99,7 +102,8 @@ class AppConfig:
     status_text: str
     presence: discord.Status
     celebrate_channel_id: int | None
-    log_channel_id: int | None
+    system_log_channel_id: int | None
+    bulk_log_channel_id: int | None
     celebrate_message: str
     timezone: ZoneInfo
     ignore_bots: bool
@@ -221,6 +225,14 @@ def _parse_optional_id(raw: dict[str, Any], key: str) -> int | None:
     return _parse_id(value, f"「{key}」")
 
 
+def _parse_log_channel(raw: dict[str, Any], key: str) -> int | None:
+    """ログチャンネル ID を読み取る（新キーが無ければ旧キーで代替）。"""
+    # 新キーが書かれていればそちらを優先する（0 なら明示的に無効）
+    if key in raw:
+        return _parse_optional_id(raw, key)
+    return _parse_optional_id(raw, KEY_LEGACY_LOG_CHANNEL)
+
+
 def _parse_celebrate_message(raw: dict[str, Any]) -> str:
     """お祝いメッセージのテンプレートを読み取り、差し込み項目を検証する。"""
     template = str(raw.get(KEY_CELEBRATE_MESSAGE) or DEFAULT_CELEBRATE_MESSAGE)
@@ -302,7 +314,8 @@ def load_config(path: Path) -> AppConfig:
         status_text=_parse_status_text(raw),
         presence=_parse_presence(raw),
         celebrate_channel_id=_parse_optional_id(raw, KEY_CELEBRATE_CHANNEL),
-        log_channel_id=_parse_optional_id(raw, KEY_LOG_CHANNEL),
+        system_log_channel_id=_parse_log_channel(raw, KEY_SYSTEM_LOG_CHANNEL),
+        bulk_log_channel_id=_parse_log_channel(raw, KEY_BULK_LOG_CHANNEL),
         celebrate_message=_parse_celebrate_message(raw),
         timezone=_parse_timezone(raw),
         ignore_bots=ignore_bots,

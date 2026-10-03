@@ -58,7 +58,7 @@ class GradeCog(commands.Cog):
         # 以後の進捗表示先として記憶する
         self.bot.remember_panel(message)
         await interaction.followup.send(view=notice_view("✅ パネルを設置しました。"), ephemeral=True)
-        await self.bot.notifier.admin_log(
+        await self.bot.notifier.system_log(
             [f"📌 {plain_name(interaction.user)} さんが {message.jump_url} に管理パネルを設置しました"]
         )
 
