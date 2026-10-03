@@ -113,13 +113,15 @@ class CompanionBot(commands.Bot):
             await self._assign_join_roles(after)
 
     async def _assign_join_roles(self, member: discord.Member) -> None:
-        """加入ロールと学年ロール（通常は 1 年生）を付与する。"""
+        """加入ロールと学年ロール（通常は 1 年生）を付与し、入学祝いを送る。"""
         target = plan_join(member, self.config, discord.utils.utcnow())
         try:
             await apply_role_ids(member, target, reason="新規加入: 加入ロールと学年ロールを付与")
             log.info("新規加入ロールを付与: %s", member)
         except discord.HTTPException:
             log.exception("新規加入ロールの付与に失敗: %s", member)
+        # ロール付与の成否にかかわらず入学を祝う
+        await self.notifier.welcome(member)
 
     def remember_panel(self, message: discord.Message | None) -> None:
         """進捗を反映するパネルメッセージを更新する。"""

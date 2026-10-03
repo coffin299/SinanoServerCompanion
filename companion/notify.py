@@ -12,6 +12,7 @@ import discord
 
 from companion.bulk import JobProgress
 from companion.config import AppConfig
+from companion.grade import grade_number, grade_role_entry
 from companion.roles import RoleChange
 
 if TYPE_CHECKING:
@@ -137,6 +138,9 @@ class Notifier:
     async def celebrate(self, changes: Iterable[RoleChange]) -> None:
         """進級した人ごとのお祝いをお祝い通知チャンネルへ送る。"""
         config = self.bot.config
+        # メッセージが空なら進級祝いは無効
+        if not config.celebrate_message:
+            return
         lines = [
             config.celebrate_message.format(
                 name=plain_name(change.member),
@@ -146,6 +150,22 @@ class Notifier:
             for change, index in find_promotions(changes, config)
         ]
         await self._send_lines(config.celebrate_channel_id, lines)
+
+    async def welcome(self, member: discord.Member) -> None:
+        """新規加入者への入学祝いをお祝い通知チャンネルへ送る。"""
+        config = self.bot.config
+        # メッセージが空なら入学祝いは無効
+        if not config.welcome_message:
+            return
+        # 付与した学年ロール（通常は 1 年生）の表示名を差し込む
+        grade = grade_number(member.joined_at, discord.utils.utcnow(), config.timezone)
+        entry = grade_role_entry(config.grade_roles, grade)
+        text = config.welcome_message.format(
+            name=plain_name(member),
+            server=discord.utils.escape_markdown(member.guild.name),
+            role=entry.name if entry else "",
+        )
+        await self._send_lines(config.celebrate_channel_id, [text])
 
     async def report_job(self, progress: JobProgress, actor: discord.abc.User | None) -> None:
         """一括処理の結果を送る（手動は一括操作ログ、実行者なしの定期同期はシステムログ）。"""

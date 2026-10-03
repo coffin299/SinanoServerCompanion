@@ -23,6 +23,7 @@ KEY_BULK_LOG_CHANNEL = "一括操作ログチャンネルID"
 # 旧バージョンの共通ログチャンネル（新キーが無いときの代替として読む）
 KEY_LEGACY_LOG_CHANNEL = "管理ログチャンネルID"
 KEY_CELEBRATE_MESSAGE = "お祝いメッセージ"
+KEY_WELCOME_MESSAGE = "入学祝いメッセージ"
 KEY_TIMEZONE = "タイムゾーン"
 KEY_IGNORE_BOTS = "Botを対象外にする"
 KEY_SYNC_HOURS = "定期同期間隔(時間)"
@@ -57,6 +58,8 @@ MAX_STATUS_LENGTH = 128
 # お祝いメッセージの既定文と、差し込める項目の検証用サンプル
 DEFAULT_CELEBRATE_MESSAGE = "🎉 祝！{name}さんが{grade}年生になりました！"
 CELEBRATE_SAMPLE = {"name": "名無し", "grade": 2, "role": "二年生"}
+DEFAULT_WELCOME_MESSAGE = "🌸 祝！{name}さんが{server}に入学しました！ようこそ！"
+WELCOME_SAMPLE = {"name": "名無し", "server": "サーバー", "role": "一年生"}
 
 
 class ConfigError(Exception):
@@ -105,6 +108,7 @@ class AppConfig:
     system_log_channel_id: int | None
     bulk_log_channel_id: int | None
     celebrate_message: str
+    welcome_message: str
     timezone: ZoneInfo
     ignore_bots: bool
     sync_interval_hours: float
@@ -233,16 +237,26 @@ def _parse_log_channel(raw: dict[str, Any], key: str) -> int | None:
     return _parse_optional_id(raw, KEY_LEGACY_LOG_CHANNEL)
 
 
-def _parse_celebrate_message(raw: dict[str, Any]) -> str:
-    """お祝いメッセージのテンプレートを読み取り、差し込み項目を検証する。"""
-    template = str(raw.get(KEY_CELEBRATE_MESSAGE) or DEFAULT_CELEBRATE_MESSAGE)
+def _parse_template(
+    raw: dict[str, Any], key: str, default: str, sample: dict[str, Any]
+) -> str:
+    """メッセージテンプレートを読み取り、差し込み項目を検証する。
+
+    キーが無ければ既定文、空文字なら「送らない」として空文字を返す。
+    """
+    # キー自体が無ければ既定文を使う
+    if key not in raw:
+        return default
+    template = str(raw.get(key) or "").strip()
+    # 空なら通知を無効にする
+    if not template:
+        return ""
     try:
         # 未知の {項目} や括弧の閉じ忘れを起動時に検出する
-        template.format(**CELEBRATE_SAMPLE)
+        template.format(**sample)
     except (KeyError, IndexError, ValueError) as exc:
-        raise ConfigError(
-            f"「{KEY_CELEBRATE_MESSAGE}」で使えるのは {{name}} {{grade}} {{role}} だけです: {exc}"
-        ) from exc
+        allowed = " ".join(f"{{{name}}}" for name in sample)
+        raise ConfigError(f"「{key}」で使えるのは {allowed} だけです: {exc}") from exc
     return template
 
 
@@ -316,7 +330,12 @@ def load_config(path: Path) -> AppConfig:
         celebrate_channel_id=_parse_optional_id(raw, KEY_CELEBRATE_CHANNEL),
         system_log_channel_id=_parse_log_channel(raw, KEY_SYSTEM_LOG_CHANNEL),
         bulk_log_channel_id=_parse_log_channel(raw, KEY_BULK_LOG_CHANNEL),
-        celebrate_message=_parse_celebrate_message(raw),
+        celebrate_message=_parse_template(
+            raw, KEY_CELEBRATE_MESSAGE, DEFAULT_CELEBRATE_MESSAGE, CELEBRATE_SAMPLE
+        ),
+        welcome_message=_parse_template(
+            raw, KEY_WELCOME_MESSAGE, DEFAULT_WELCOME_MESSAGE, WELCOME_SAMPLE
+        ),
         timezone=_parse_timezone(raw),
         ignore_bots=ignore_bots,
         sync_interval_hours=_parse_number(raw, KEY_SYNC_HOURS, DEFAULT_SYNC_HOURS, 0),
