@@ -46,8 +46,8 @@ class ChatCog(commands.Cog):
         # 無効化中や Bot 同士の会話には反応しない
         if not config.enabled or message.author.bot or self.bot.user is None:
             return False
-        # 対象サーバー以外（DM 含む）は無視する
-        if message.guild is None or message.guild.id != self.bot.config.guild_id:
+        # Bot が参加しているどのサーバーでも応答する（DM は無視する）
+        if message.guild is None:
             return False
         # Bot 自身が直接メンションされたときだけ反応する（@everyone 等は除外）
         if self.bot.user not in message.mentions:
