@@ -32,6 +32,23 @@ KEY_PROGRESS_INTERVAL = "進捗更新間隔(秒)"
 KEY_JOIN_ROLES = "新規加入時必ず付けるロール"
 KEY_GRADE_ROLES = "サーバー参加年数ごとに付けるロール"
 
+# メンション応答（LLM）セクションとその中のキー名
+KEY_LLM = "LLM"
+KEY_LLM_ENABLED = "有効"
+KEY_LLM_API_KEY = "APIキー"
+KEY_LLM_BASE_URL = "APIのURL"
+KEY_LLM_MODEL = "モデル"
+KEY_LLM_PROMPT = "キャラクター設定"
+KEY_LLM_TEMPERATURE = "温度"
+KEY_LLM_MAX_TOKENS = "最大トークン数"
+KEY_LLM_HISTORY = "会話履歴の件数"
+KEY_LLM_WEB_SEARCH = "Web検索"
+KEY_LLM_SEARCH_RESULTS = "検索結果の件数"
+KEY_LLM_CHANNELS = "応答するチャンネルID"
+KEY_LLM_COOLDOWN = "ユーザーごとの間隔(秒)"
+KEY_LLM_TIMEOUT = "タイムアウト(秒)"
+KEY_LLM_WAITING = "待機中メッセージ"
+
 # 未記入のまま起動されたことを検出するためのプレースホルダ
 PLACEHOLDER_TOKEN = "ここにBotトークンを貼り付け"
 
@@ -44,6 +61,24 @@ DEFAULT_PROGRESS_INTERVAL = 5.0
 MIN_PROGRESS_INTERVAL = 2.0
 DEFAULT_PRESENCE = "online"
 
+# メンション応答（LLM）の既定値（NVIDIA NIM の OpenAI 互換エンドポイントを想定）
+DEFAULT_LLM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+DEFAULT_LLM_MODEL = "meta/llama-3.3-70b-instruct"
+DEFAULT_LLM_PROMPT = (
+    "あなたは Discord サーバーにいるフレンドリーなアシスタント Bot です。"
+    "日本語で、簡潔かつ親しみやすく答えてください。Discord のマークダウンが使えます。"
+)
+DEFAULT_LLM_TEMPERATURE = 0.7
+MAX_LLM_TEMPERATURE = 2.0
+DEFAULT_LLM_MAX_TOKENS = 1024
+DEFAULT_LLM_HISTORY = 10
+DEFAULT_LLM_SEARCH_RESULTS = 5
+MAX_LLM_SEARCH_RESULTS = 10
+DEFAULT_LLM_COOLDOWN = 3.0
+DEFAULT_LLM_TIMEOUT = 60.0
+MIN_LLM_TIMEOUT = 5.0
+DEFAULT_LLM_WAITING = "💭 考え中…"
+
 # 「オンライン状態」に書ける値と discord.Status の対応
 PRESENCE_MAP = {
     "online": discord.Status.online,
@@ -54,6 +89,8 @@ PRESENCE_MAP = {
 
 # カスタムステータスの最大文字数（Discord の上限）
 MAX_STATUS_LENGTH = 128
+# 1 メッセージの最大文字数（Discord の上限）
+MAX_MESSAGE_LENGTH = 2000
 
 # お祝いメッセージの既定文と、差し込める項目の検証用サンプル
 DEFAULT_CELEBRATE_MESSAGE = "🎉 祝！{name}さんが{grade}年生になりました！"
@@ -96,6 +133,28 @@ class RoleEntry:
 
 
 @dataclass(frozen=True)
+class LLMConfig:
+    """メンション応答（LLM）の設定。"""
+
+    enabled: bool
+    api_key: str
+    base_url: str
+    # 上から順に試すモデル（先頭が失敗したら次へフォールバック）
+    models: tuple[str, ...]
+    system_prompt: str
+    temperature: float
+    max_tokens: int
+    history_limit: int
+    web_search: bool
+    search_results: int
+    channel_ids: frozenset[int]
+    cooldown_seconds: float
+    timeout_seconds: float
+    # 応答待ちの間に表示する文言（空なら表示しない）
+    waiting_message: str
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """検証済みのアプリケーション設定。"""
 
@@ -116,6 +175,7 @@ class AppConfig:
     progress_interval_seconds: float
     join_roles: tuple[RoleEntry, ...]
     grade_roles: tuple[RoleEntry, ...]
+    llm: LLMConfig
 
     @property
     def join_role_ids(self) -> frozenset[int]:
@@ -148,9 +208,13 @@ def _parse_id(value: Any, label: str) -> int:
 
 
 def _parse_number(
-    raw: dict[str, Any], key: str, default: float, minimum: float
+    raw: dict[str, Any],
+    key: str,
+    default: float,
+    minimum: float,
+    maximum: float | None = None,
 ) -> float:
-    """数値設定を読み取り、下限を検証して float で返す。"""
+    """数値設定を読み取り、上下限を検証して float で返す。"""
     # 未記入なら既定値を使う
     value = raw.get(key, default)
     # bool や文字列は数値として扱わない
@@ -159,7 +223,49 @@ def _parse_number(
     # 下限を下回る値は拒否する
     if value < minimum:
         raise ConfigError(f"「{key}」は {minimum} 以上で指定してください。")
+    # 上限が決まっている設定は超過も拒否する
+    if maximum is not None and value > maximum:
+        raise ConfigError(f"「{key}」は {maximum} 以下で指定してください。")
     return float(value)
+
+
+def _parse_int(
+    raw: dict[str, Any],
+    key: str,
+    default: int,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    """整数設定を読み取り、上下限を検証して int で返す。"""
+    value = _parse_number(raw, key, default, minimum, maximum)
+    # 件数などに小数が書かれていたら拒否する
+    if not value.is_integer():
+        raise ConfigError(f"「{key}」は整数で指定してください。")
+    return int(value)
+
+
+def _parse_bool(raw: dict[str, Any], key: str, default: bool) -> bool:
+    """真偽値設定を読み取る（true / false 以外は拒否）。"""
+    value = raw.get(key, default)
+    # "yes" や 1 などの曖昧な値は誤設定とみなす
+    if not isinstance(value, bool):
+        raise ConfigError(f"「{key}」は true / false で指定してください。")
+    return value
+
+
+def _parse_id_list(raw: dict[str, Any], key: str) -> frozenset[int]:
+    """ID のリスト設定を読み取る（1 件だけなら単体の値でも可、未記入なら空）。"""
+    section = raw.get(key)
+    # 未記入や空リストは空集合として扱う
+    if section in (None, "", []):
+        return frozenset()
+    # 1 件だけの場合は単体の値でも書けるようにする
+    if isinstance(section, (int, str)) and not isinstance(section, bool):
+        section = [section]
+    # リスト以外（マッピング等）は形式エラー
+    if not isinstance(section, list):
+        raise ConfigError(f"「{key}」は ID のリストで書いてください。")
+    return frozenset(_parse_id(value, f"「{key}」") for value in section)
 
 
 def _parse_roles(
@@ -190,14 +296,11 @@ def _parse_roles(
 
 def _parse_allowed_users(raw: dict[str, Any]) -> frozenset[int]:
     """コマンドを使えるユーザー ID のホワイトリストを読み取る。"""
-    section = raw.get(KEY_ALLOWED_USERS)
-    # 1 件だけの場合は単体の値でも書けるようにする
-    if isinstance(section, (int, str)) and not isinstance(section, bool):
-        section = [section]
+    user_ids = _parse_id_list(raw, KEY_ALLOWED_USERS)
     # 未記入や空リストだと誰も操作できなくなるため必須にする
-    if not section or not isinstance(section, list):
+    if not user_ids:
         raise ConfigError(f"「{KEY_ALLOWED_USERS}」に 1 人以上のユーザー ID を書いてください。")
-    return frozenset(_parse_id(value, f"「{KEY_ALLOWED_USERS}」") for value in section)
+    return user_ids
 
 
 def _parse_status_text(raw: dict[str, Any]) -> str:
@@ -270,6 +373,75 @@ def _parse_timezone(raw: dict[str, Any]) -> ZoneInfo:
         raise ConfigError(f"「{KEY_TIMEZONE}」が不正です: {name}") from exc
 
 
+def _parse_text(raw: dict[str, Any], key: str, default: str) -> str:
+    """文字列設定を読み取る（未記入・空なら既定値）。"""
+    return str(raw.get(key) or "").strip() or default
+
+
+def _parse_optional_text(raw: dict[str, Any], key: str, default: str) -> str:
+    """文字列設定を読み取る（キーが無ければ既定値、空なら無効として空文字）。"""
+    # キー自体が無ければ既定値を使う
+    if key not in raw:
+        return default
+    text = str(raw.get(key) or "").strip()
+    # Discord の 1 メッセージの上限を超えると送れないため事前に弾く
+    if len(text) > MAX_MESSAGE_LENGTH:
+        raise ConfigError(f"「{key}」は {MAX_MESSAGE_LENGTH} 文字以内にしてください。")
+    return text
+
+
+def _parse_text_list(raw: dict[str, Any], key: str, default: str) -> tuple[str, ...]:
+    """文字列 1 つ、または文字列のリストを読み取る（未記入・空なら既定値のみ）。"""
+    value = raw.get(key)
+    # 単体の文字列は 1 件のリストとして扱う
+    if isinstance(value, str):
+        value = [value]
+    # 未記入はリストが空のときと同じく既定値にする
+    if value is None:
+        value = []
+    # リスト以外（マッピング等）は形式エラー
+    if not isinstance(value, list):
+        raise ConfigError(f"「{key}」は文字列、または文字列のリストで書いてください。")
+    # 空要素を除き、重複は最初の 1 つだけ残して順番を保つ
+    items = tuple(dict.fromkeys(str(item).strip() for item in value if str(item or "").strip()))
+    return items or (default,)
+
+
+def _parse_llm(raw: dict[str, Any]) -> LLMConfig:
+    """メンション応答（LLM）セクションを読み取る。"""
+    section = raw.get(KEY_LLM) or {}
+    # セクションはマッピングで書く必要がある
+    if not isinstance(section, dict):
+        raise ConfigError(f"「{KEY_LLM}」は「キー: 値」の形式で書いてください。")
+    enabled = _parse_bool(section, KEY_LLM_ENABLED, False)
+    api_key = str(section.get(KEY_LLM_API_KEY) or "").strip()
+    # 有効なのに API キーが無いと応答できないため起動時に弾く
+    if enabled and not api_key:
+        raise ConfigError(f"「{KEY_LLM}」の「{KEY_LLM_API_KEY}」を設定してください。")
+    return LLMConfig(
+        enabled=enabled,
+        api_key=api_key,
+        base_url=_parse_text(section, KEY_LLM_BASE_URL, DEFAULT_LLM_BASE_URL),
+        models=_parse_text_list(section, KEY_LLM_MODEL, DEFAULT_LLM_MODEL),
+        system_prompt=_parse_text(section, KEY_LLM_PROMPT, DEFAULT_LLM_PROMPT),
+        temperature=_parse_number(
+            section, KEY_LLM_TEMPERATURE, DEFAULT_LLM_TEMPERATURE, 0, MAX_LLM_TEMPERATURE
+        ),
+        max_tokens=_parse_int(section, KEY_LLM_MAX_TOKENS, DEFAULT_LLM_MAX_TOKENS, 1),
+        history_limit=_parse_int(section, KEY_LLM_HISTORY, DEFAULT_LLM_HISTORY, 0),
+        web_search=_parse_bool(section, KEY_LLM_WEB_SEARCH, True),
+        search_results=_parse_int(
+            section, KEY_LLM_SEARCH_RESULTS, DEFAULT_LLM_SEARCH_RESULTS, 1, MAX_LLM_SEARCH_RESULTS
+        ),
+        channel_ids=_parse_id_list(section, KEY_LLM_CHANNELS),
+        cooldown_seconds=_parse_number(section, KEY_LLM_COOLDOWN, DEFAULT_LLM_COOLDOWN, 0),
+        timeout_seconds=_parse_number(
+            section, KEY_LLM_TIMEOUT, DEFAULT_LLM_TIMEOUT, MIN_LLM_TIMEOUT
+        ),
+        waiting_message=_parse_optional_text(section, KEY_LLM_WAITING, DEFAULT_LLM_WAITING),
+    )
+
+
 def ensure_config_file(path: Path, example_path: Path) -> bool:
     """設定ファイルが無ければ雛形をコピーする。コピーした場合 True。"""
     # 既に存在するなら何もしない
@@ -316,11 +488,6 @@ def load_config(path: Path) -> AppConfig:
             + ", ".join(str(role_id) for role_id in sorted(overlap))
         )
 
-    # 真偽値設定は bool 以外を拒否する
-    ignore_bots = raw.get(KEY_IGNORE_BOTS, DEFAULT_IGNORE_BOTS)
-    if not isinstance(ignore_bots, bool):
-        raise ConfigError(f"「{KEY_IGNORE_BOTS}」は true / false で指定してください。")
-
     return AppConfig(
         token=token,
         guild_id=_parse_id(raw.get(KEY_GUILD_ID), f"「{KEY_GUILD_ID}」"),
@@ -337,7 +504,7 @@ def load_config(path: Path) -> AppConfig:
             raw, KEY_WELCOME_MESSAGE, DEFAULT_WELCOME_MESSAGE, WELCOME_SAMPLE
         ),
         timezone=_parse_timezone(raw),
-        ignore_bots=ignore_bots,
+        ignore_bots=_parse_bool(raw, KEY_IGNORE_BOTS, DEFAULT_IGNORE_BOTS),
         sync_interval_hours=_parse_number(raw, KEY_SYNC_HOURS, DEFAULT_SYNC_HOURS, 0),
         api_delay_seconds=_parse_number(raw, KEY_API_DELAY, DEFAULT_API_DELAY, 0),
         progress_interval_seconds=_parse_number(
@@ -345,4 +512,5 @@ def load_config(path: Path) -> AppConfig:
         ),
         join_roles=join_roles,
         grade_roles=grade_roles,
+        llm=_parse_llm(raw),
     )

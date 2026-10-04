@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from companion.bulk import JobProgress
-from companion.config import AppConfig
+from companion.config import MAX_MESSAGE_LENGTH, AppConfig
 from companion.grade import grade_number, grade_role_entry
 from companion.roles import RoleChange
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 # Discord の 1 メッセージあたりの最大文字数
-MESSAGE_LIMIT = 2000
+MESSAGE_LIMIT = MAX_MESSAGE_LENGTH
 # 連続送信するときの最小間隔（秒、チャンネル単位のレート制限対策）
 MIN_SEND_INTERVAL = 1.0
 
@@ -69,15 +69,16 @@ def pack_lines(lines: Iterable[str], limit: int = MESSAGE_LIMIT) -> list[str]:
     chunks: list[str] = []
     current = ""
     for line in lines:
-        # 1 行で上限を超える異常値は切り詰める
-        line = line[:limit]
-        candidate = f"{current}\n{line}" if current else line
-        # 上限を超えるなら今の塊を確定して新しい塊を始める
-        if len(candidate) > limit:
-            chunks.append(current)
-            current = line
-        else:
-            current = candidate
+        # 1 行で上限を超える場合は上限ごとに分割して別の行として扱う
+        pieces = [line[i:i + limit] for i in range(0, len(line), limit)] or [""]
+        for piece in pieces:
+            candidate = f"{current}\n{piece}" if current else piece
+            # 上限を超えるなら今の塊を確定して新しい塊を始める
+            if len(candidate) > limit:
+                chunks.append(current)
+                current = piece
+            else:
+                current = candidate
     # 最後の塊を確定する
     if current:
         chunks.append(current)

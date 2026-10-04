@@ -15,6 +15,7 @@ from discord.ext import commands
 from companion import actions
 from companion.actions import BulkAction
 from companion.bulk import BulkRoleRunner, JobProgress
+from companion.chat import ChatCog
 from companion.config import AppConfig, load_config
 from companion.notify import Notifier
 from companion.panel import AdminPanel
@@ -64,12 +65,18 @@ class CompanionBot(commands.Bot):
         # 再起動前に設置したパネルのボタンも反応するよう永続登録する
         self.add_view(AdminPanel(self))
         await self.add_cog(GradeCog(self))
+        await self.add_cog(ChatCog(self))
         # 対象サーバーにだけコマンドを即時反映する
         guild = discord.Object(id=self.config.guild_id)
         self.tree.copy_global_to(guild=guild)
         synced = await self.tree.sync(guild=guild)
         log.info("スラッシュコマンドを %d 件同期しました", len(synced))
         self._spawn(self._periodic_sync_loop())
+
+    async def on_message(self, message: discord.Message) -> None:
+        # プレフィックスコマンドは無いので処理しない
+        # （メンション付き発言が CommandNotFound としてエラーログに出るのを防ぐ）
+        return
 
     async def on_ready(self) -> None:
         log.info("ログインしました: %s", self.user)
