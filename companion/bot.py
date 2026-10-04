@@ -17,6 +17,7 @@ from companion.actions import BulkAction
 from companion.bulk import BulkRoleRunner, JobProgress
 from companion.chat import ChatCog
 from companion.config import AppConfig, load_config
+from companion.llm import LLMClient
 from companion.notify import Notifier
 from companion.panel import AdminPanel
 from companion.roles import apply_role_ids, plan_join
@@ -54,6 +55,8 @@ class CompanionBot(commands.Bot):
         self.config = config
         self.config_path = config_path
         self.runner = BulkRoleRunner()
+        # メンション応答とお祝い文の生成で共有する LLM クライアント
+        self.llm = LLMClient()
         self.notifier = Notifier(self)
         # 進捗を反映するパネルメッセージ（最後に操作・設置されたもの）
         self._panel_message: discord.Message | None = None

@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections import Counter
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 
@@ -24,6 +24,18 @@ log = logging.getLogger(__name__)
 MESSAGE_LIMIT = MAX_MESSAGE_LENGTH
 # 連続送信するときの最小間隔（秒、チャンネル単位のレート制限対策）
 MIN_SEND_INTERVAL = 1.0
+# 1 回の同期で LLM にお祝いを書かせる最大人数（超えた分は定型文、API の使い過ぎ防止）
+MAX_LLM_GREETINGS = 10
+# お祝い文を LLM で書くときにキャラクター設定へ添える指示
+GREETING_SYSTEM_HINT = (
+    "これから Discord に投稿するメッセージを、上のキャラクターとして書いてもらいます。"
+    "一人称・口調・語尾・性格などのキャラクター設定を必ず守り、"
+    "そのキャラクターが自分の言葉で話しているように書いてください。"
+    "前置きや説明は付けず、投稿するメッセージ本文だけを出力してください。"
+    "@ を使ったメンションは書かないでください。"
+)
+# 参考として渡す定型文の扱い（口調が定型文に引っ張られないようにする）
+GREETING_REFERENCE_NOTE = "以下の定型文は内容の参考です。口調は真似せず、キャラクターらしく書き直してください。"
 
 
 def plain_name(user: discord.abc.User) -> str:
@@ -136,20 +148,56 @@ class Notifier:
         """一括操作ログチャンネル（手動の一括操作）へ送る。"""
         await self._send_lines(self.bot.config.bulk_log_channel_id, lines)
 
+    async def _compose(
+        self, template: str, instruction: str, values: dict[str, Any], use_llm: bool
+    ) -> str:
+        """お祝い文を作る（LLM で書けなければ定型文を返す）。"""
+        fallback = template.format(**values)
+        llm = self.bot.config.llm
+        # LLM が無効・指示文が空・上限超過なら定型文のまま
+        if not (use_llm and llm.enabled and llm.greetings and instruction):
+            return fallback
+        messages = [
+            # キャラクター設定を土台にして、投稿文の書き方を添える
+            {"role": "system", "content": f"{llm.system_prompt}\n\n{GREETING_SYSTEM_HINT}"},
+            # 定型文は内容の方向性だけ揃え、口調はキャラクターに任せる
+            {
+                "role": "user",
+                "content": f"{instruction.format(**values)}\n\n{GREETING_REFERENCE_NOTE}\n{fallback}",
+            },
+        ]
+        try:
+            # お祝いに検索は不要なのでツールは使わない
+            written = await self.bot.llm.generate(llm, messages, allow_tools=False)
+        except Exception:  # noqa: BLE001
+            # 生成に失敗してもお祝い自体は定型文で必ず送る
+            log.exception("お祝い文の生成に失敗したため定型文を使います")
+            return fallback
+        # 空の応答も失敗とみなして定型文にする
+        return written or fallback
+
     async def celebrate(self, changes: Iterable[RoleChange]) -> None:
         """進級した人ごとのお祝いをお祝い通知チャンネルへ送る。"""
         config = self.bot.config
         # メッセージが空なら進級祝いは無効
         if not config.celebrate_message:
             return
-        lines = [
-            config.celebrate_message.format(
-                name=plain_name(change.member),
-                grade=index + 1,
-                role=config.grade_roles[index].name,
+        lines = []
+        for count, (change, index) in enumerate(find_promotions(changes, config)):
+            values = {
+                "name": plain_name(change.member),
+                "grade": index + 1,
+                "role": config.grade_roles[index].name,
+            }
+            # 大人数のときは上限を超えた分だけ定型文にする
+            lines.append(
+                await self._compose(
+                    config.celebrate_message,
+                    config.llm.celebrate_prompt,
+                    values,
+                    use_llm=count < MAX_LLM_GREETINGS,
+                )
             )
-            for change, index in find_promotions(changes, config)
-        ]
         await self._send_lines(config.celebrate_channel_id, lines)
 
     async def welcome(self, member: discord.Member) -> None:
@@ -161,10 +209,13 @@ class Notifier:
         # 付与した学年ロール（通常は 1 年生）の表示名を差し込む
         grade = grade_number(member.joined_at, discord.utils.utcnow(), config.timezone)
         entry = grade_role_entry(config.grade_roles, grade)
-        text = config.welcome_message.format(
-            name=plain_name(member),
-            server=discord.utils.escape_markdown(member.guild.name),
-            role=entry.name if entry else "",
+        values = {
+            "name": plain_name(member),
+            "server": discord.utils.escape_markdown(member.guild.name),
+            "role": entry.name if entry else "",
+        }
+        text = await self._compose(
+            config.welcome_message, config.llm.welcome_prompt, values, use_llm=True
         )
         await self._send_lines(config.celebrate_channel_id, [text])
 

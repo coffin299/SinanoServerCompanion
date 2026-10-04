@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands
 
 from companion.config import LLMConfig
-from companion.llm import LLMClient, Message
+from companion.llm import Message
 from companion.notify import pack_lines
 
 if TYPE_CHECKING:
@@ -37,7 +37,6 @@ class ChatCog(commands.Cog):
 
     def __init__(self, bot: CompanionBot) -> None:
         self.bot = bot
-        self.llm = LLMClient()
         # ユーザーごとの最終利用時刻（連投による API 消費を抑える）
         self._last_used: dict[int, float] = {}
 
@@ -199,7 +198,7 @@ class ChatCog(commands.Cog):
             log.info("LLM 応答を生成: %s (%d 発言)", message.author, len(messages) - 1)
             # 生成中は「入力中…」も表示する
             async with message.channel.typing():
-                answer = await self.llm.generate(config, messages)
+                answer = await self.bot.llm.generate(config, messages)
         except Exception:  # noqa: BLE001
             # API エラー以外でも待機表示が残り続けないよう、必ずエラー文に書き換える
             log.exception("LLM の応答生成に失敗しました")

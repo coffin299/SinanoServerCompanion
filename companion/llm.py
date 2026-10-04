@@ -132,12 +132,15 @@ class LLMClient:
             return "エラー: ツールの引数が正しい JSON ではありません。"
         return await web_search(str(arguments.get("query", "")), config.search_results)
 
-    async def generate(self, config: LLMConfig, messages: list[Message]) -> str:
-        """会話履歴から応答を生成する（必要に応じてウェブ検索を挟む）。"""
+    async def generate(
+        self, config: LLMConfig, messages: list[Message], allow_tools: bool = True
+    ) -> str:
+        """会話履歴から応答を生成する（許可され設定でも有効ならウェブ検索を挟む）。"""
         # 呼び出し元の履歴を壊さないよう複製して追記する
         messages = list(messages)
+        use_tools = allow_tools and config.web_search
         for _ in range(MAX_TOOL_ROUNDS):
-            reply = await self._complete(config, messages, use_tools=config.web_search)
+            reply = await self._complete(config, messages, use_tools=use_tools)
             # ツール要求が無ければそれが最終回答
             if not reply.tool_calls:
                 return clean_reply(reply.content)

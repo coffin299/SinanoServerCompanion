@@ -48,6 +48,9 @@ KEY_LLM_CHANNELS = "応答するチャンネルID"
 KEY_LLM_COOLDOWN = "ユーザーごとの間隔(秒)"
 KEY_LLM_TIMEOUT = "タイムアウト(秒)"
 KEY_LLM_WAITING = "待機中メッセージ"
+KEY_LLM_GREETINGS = "お祝いもLLMで書く"
+KEY_LLM_CELEBRATE_PROMPT = "進級祝いの指示"
+KEY_LLM_WELCOME_PROMPT = "入学祝いの指示"
 
 # 未記入のまま起動されたことを検出するためのプレースホルダ
 PLACEHOLDER_TOKEN = "ここにBotトークンを貼り付け"
@@ -78,6 +81,14 @@ DEFAULT_LLM_COOLDOWN = 3.0
 DEFAULT_LLM_TIMEOUT = 60.0
 MIN_LLM_TIMEOUT = 5.0
 DEFAULT_LLM_WAITING = "💭 考え中…"
+DEFAULT_LLM_CELEBRATE_PROMPT = (
+    "{name}さんがサーバーへの参加から 1 年経ち、{grade}年生（{role}）に進級しました。"
+    "絵文字を交えて、1〜2 文のお祝いメッセージを書いてください。"
+)
+DEFAULT_LLM_WELCOME_PROMPT = (
+    "{name}さんがサーバー「{server}」に新しく参加し、{role}として入学しました。"
+    "絵文字を交えて、1〜2 文の歓迎メッセージを書いてください。"
+)
 
 # 「オンライン状態」に書ける値と discord.Status の対応
 PRESENCE_MAP = {
@@ -152,6 +163,11 @@ class LLMConfig:
     timeout_seconds: float
     # 応答待ちの間に表示する文言（空なら表示しない）
     waiting_message: str
+    # 進級祝い・入学祝いを LLM で書くか（失敗時は定型文に戻す）
+    greetings: bool
+    # LLM に渡す指示文（空ならその祝いは定型文のまま）
+    celebrate_prompt: str
+    welcome_prompt: str
 
 
 @dataclass(frozen=True)
@@ -439,6 +455,13 @@ def _parse_llm(raw: dict[str, Any]) -> LLMConfig:
             section, KEY_LLM_TIMEOUT, DEFAULT_LLM_TIMEOUT, MIN_LLM_TIMEOUT
         ),
         waiting_message=_parse_optional_text(section, KEY_LLM_WAITING, DEFAULT_LLM_WAITING),
+        greetings=_parse_bool(section, KEY_LLM_GREETINGS, False),
+        celebrate_prompt=_parse_template(
+            section, KEY_LLM_CELEBRATE_PROMPT, DEFAULT_LLM_CELEBRATE_PROMPT, CELEBRATE_SAMPLE
+        ),
+        welcome_prompt=_parse_template(
+            section, KEY_LLM_WELCOME_PROMPT, DEFAULT_LLM_WELCOME_PROMPT, WELCOME_SAMPLE
+        ),
     )
 
 
