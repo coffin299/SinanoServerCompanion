@@ -42,20 +42,21 @@ class LLMClient:
     def __init__(self) -> None:
         self._client: openai.AsyncOpenAI | None = None
         # 現在のクライアントを作った接続設定（再読込で変わったら作り直す）
-        self._client_key: tuple[str, str, float] | None = None
+        self._client_key: tuple[str, str] | None = None
         # 廃止と判定したモデル（設定の再読込でモデル一覧が変わるまで飛ばす）
         self._gone_models: set[str] = set()
         self._models_key: tuple[str, ...] = ()
 
     def _get_client(self, config: LLMConfig) -> openai.AsyncOpenAI:
         """接続設定に対応するクライアントを返す。"""
-        key = (config.api_key, config.base_url, config.timeout_seconds)
+        key = (config.api_key, config.base_url)
         # 接続設定が変わったときだけ作り直す
         if self._client is None or self._client_key != key:
             self._client = openai.AsyncOpenAI(
                 api_key=config.api_key,
                 base_url=config.base_url,
-                timeout=config.timeout_seconds,
+                # 混雑時の遅い応答も打ち切らず、返ってくるまで待つ
+                timeout=None,
                 max_retries=MAX_RETRIES,
             )
             self._client_key = key
@@ -90,7 +91,7 @@ class LLMClient:
                 else:
                     log.warning("モデル %s でエラー（%s）。次のモデルを試します", model, exc.status_code)
             except (openai.APIConnectionError, openai.APITimeoutError) as exc:
-                # 通信失敗・タイムアウトも次のモデルで救済を試みる
+                # 通信失敗も次のモデルで救済を試みる
                 last_error = exc
                 log.warning("モデル %s に接続できません（%s）。次のモデルを試します", model, type(exc).__name__)
         # すべてのモデルが失敗したら最後のエラーを呼び出し元へ伝える

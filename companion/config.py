@@ -46,7 +46,6 @@ KEY_LLM_WEB_SEARCH = "Web検索"
 KEY_LLM_SEARCH_RESULTS = "検索結果の件数"
 KEY_LLM_CHANNELS = "応答するチャンネルID"
 KEY_LLM_COOLDOWN = "ユーザーごとの間隔(秒)"
-KEY_LLM_TIMEOUT = "タイムアウト(秒)"
 KEY_LLM_WAITING = "待機中メッセージ"
 KEY_LLM_GREETINGS = "お祝いもLLMで書く"
 KEY_LLM_CELEBRATE_PROMPT = "進級祝いの指示"
@@ -78,8 +77,6 @@ DEFAULT_LLM_HISTORY = 10
 DEFAULT_LLM_SEARCH_RESULTS = 5
 MAX_LLM_SEARCH_RESULTS = 10
 DEFAULT_LLM_COOLDOWN = 3.0
-DEFAULT_LLM_TIMEOUT = 60.0
-MIN_LLM_TIMEOUT = 5.0
 DEFAULT_LLM_WAITING = "💭 考え中…"
 DEFAULT_LLM_CELEBRATE_PROMPT = (
     "{name}さんがサーバーへの参加から 1 年経ち、{grade}年生（{role}）に進級しました。"
@@ -160,7 +157,6 @@ class LLMConfig:
     search_results: int
     channel_ids: frozenset[int]
     cooldown_seconds: float
-    timeout_seconds: float
     # 応答待ちの間に表示する文言（空なら表示しない）
     waiting_message: str
     # 進級祝い・入学祝いを LLM で書くか（失敗時は定型文に戻す）
@@ -451,9 +447,6 @@ def _parse_llm(raw: dict[str, Any]) -> LLMConfig:
         ),
         channel_ids=_parse_id_list(section, KEY_LLM_CHANNELS),
         cooldown_seconds=_parse_number(section, KEY_LLM_COOLDOWN, DEFAULT_LLM_COOLDOWN, 0),
-        timeout_seconds=_parse_number(
-            section, KEY_LLM_TIMEOUT, DEFAULT_LLM_TIMEOUT, MIN_LLM_TIMEOUT
-        ),
         waiting_message=_parse_optional_text(section, KEY_LLM_WAITING, DEFAULT_LLM_WAITING),
         greetings=_parse_bool(section, KEY_LLM_GREETINGS, False),
         celebrate_prompt=_parse_template(

@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING
 
 import discord
+import openai
 from discord.ext import commands
 
 from companion.config import LLMConfig
@@ -25,6 +26,7 @@ EMPTY_MENTION_REPLY = "はい、何か御用でしょうか？"
 COOLDOWN_REPLY = "⏳ 少し待ってからもう一度話しかけてください。"
 EMPTY_ANSWER_REPLY = "（うまく答えられませんでした…）"
 ERROR_REPLY = "⚠️ 応答の生成に失敗しました。しばらくしてからもう一度お試しください。"
+CONNECTION_ERROR_REPLY = "⌛ AI サーバーが混み合っていて応答できませんでした。少し時間をおいてお試しください。"
 # ウェブ検索が使えるときにシステムプロンプトへ添える指示
 SEARCH_HINT = (
     "最新の情報や知らない事柄について聞かれたら web_search ツールで調べ、"
@@ -199,6 +201,11 @@ class ChatCog(commands.Cog):
             # 生成中は「入力中…」も表示する
             async with message.channel.typing():
                 answer = await self.bot.llm.generate(config, messages)
+        except (openai.APIConnectionError, openai.APITimeoutError) as exc:
+            # 外部 API の一時的な遅延・通信断は想定内なので、トレースバックを出さず 1 行で記録する
+            log.warning("LLM API に接続できず応答を諦めました（%s）", type(exc).__name__)
+            await self._send_reply(message, CONNECTION_ERROR_REPLY, waiting)
+            return
         except Exception:  # noqa: BLE001
             # API エラー以外でも待機表示が残り続けないよう、必ずエラー文に書き換える
             log.exception("LLM の応答生成に失敗しました")
