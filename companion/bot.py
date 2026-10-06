@@ -108,19 +108,38 @@ class CompanionBot(commands.Bot):
         # 設定により Bot アカウントを除外する
         return not (self.config.ignore_bots and member.bot)
 
+    def _is_welcome_only(self, member: discord.Member) -> bool:
+        """入学祝いだけ送る別サーバーのメンバーかどうか。"""
+        # 対象サーバーの設定が優先されるので、ここでは別サーバーだけを見る
+        if member.guild.id == self.config.guild_id:
+            return False
+        if member.guild.id not in self.config.welcome_guild_ids:
+            return False
+        # Bot アカウントの扱いは対象サーバーと揃える
+        return not (self.config.ignore_bots and member.bot)
+
     async def on_member_join(self, member: discord.Member) -> None:
-        if not self._is_target(member):
+        if not (self._is_target(member) or self._is_welcome_only(member)):
             return
-        # メンバー審査（ルール同意）待ちの間は付与を保留する
+        # メンバー審査（ルール同意）待ちの間は付与・入学祝いを保留する
         if member.pending:
-            log.info("メンバー審査待ちのため付与を保留: %s", member)
+            log.info("メンバー審査待ちのため保留: %s", member)
             return
-        await self._assign_join_roles(member)
+        await self._admit(member)
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        # メンバー審査を通過した瞬間に加入ロールを付与する
-        if before.pending and not after.pending and self._is_target(after):
-            await self._assign_join_roles(after)
+        # メンバー審査を通過した瞬間を加入とみなす
+        if before.pending and not after.pending:
+            await self._admit(after)
+
+    async def _admit(self, member: discord.Member) -> None:
+        """加入を確定したメンバーをサーバーに応じて処理する。"""
+        # 対象サーバーではロール付与と入学祝いを行う
+        if self._is_target(member):
+            await self._assign_join_roles(member)
+        # 別サーバーでは入学祝いだけ送る
+        elif self._is_welcome_only(member):
+            await self.notifier.welcome(member)
 
     async def _assign_join_roles(self, member: discord.Member) -> None:
         """加入ロールと学年ロール（通常は 1 年生）を付与し、入学祝いを送る。"""

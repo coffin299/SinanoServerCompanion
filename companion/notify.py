@@ -200,11 +200,26 @@ class Notifier:
             )
         await self._send_lines(config.celebrate_channel_id, lines)
 
+    def _welcome_channel_id(self, guild: discord.Guild) -> int | None:
+        """入学祝いの送信先を返す（対象サーバーはお祝い通知チャンネル、別サーバーはシステムチャンネル）。"""
+        # 対象サーバーは設定のお祝い通知チャンネルへ送る
+        if guild.id == self.bot.config.guild_id:
+            return self.bot.config.celebrate_channel_id
+        # 別サーバーはサーバー設定の「システムメッセージチャンネル」へ送る
+        if guild.system_channel is None:
+            log.warning("サーバー %s にシステムメッセージチャンネルが無いため入学祝いを送れません", guild.name)
+            return None
+        return guild.system_channel.id
+
     async def welcome(self, member: discord.Member) -> None:
-        """新規加入者への入学祝いをお祝い通知チャンネルへ送る。"""
+        """新規加入者への入学祝いをサーバーごとの送信先へ送る。"""
         config = self.bot.config
         # メッセージが空なら入学祝いは無効
         if not config.welcome_message:
+            return
+        channel_id = self._welcome_channel_id(member.guild)
+        # 送信先が無ければ LLM も呼ばずに終える
+        if channel_id is None:
             return
         # 付与した学年ロール（通常は 1 年生）の表示名を差し込む
         grade = grade_number(member.joined_at, discord.utils.utcnow(), config.timezone)
@@ -217,7 +232,7 @@ class Notifier:
         text = await self._compose(
             config.welcome_message, config.llm.welcome_prompt, values, use_llm=True
         )
-        await self._send_lines(config.celebrate_channel_id, [text])
+        await self._send_lines(channel_id, [text])
 
     async def report_job(self, progress: JobProgress, actor: discord.abc.User | None) -> None:
         """一括処理の結果を送る（手動は一括操作ログ、実行者なしの定期同期はシステムログ）。"""

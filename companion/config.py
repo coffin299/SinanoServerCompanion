@@ -24,6 +24,7 @@ KEY_BULK_LOG_CHANNEL = "一括操作ログチャンネルID"
 KEY_LEGACY_LOG_CHANNEL = "管理ログチャンネルID"
 KEY_CELEBRATE_MESSAGE = "お祝いメッセージ"
 KEY_WELCOME_MESSAGE = "入学祝いメッセージ"
+KEY_WELCOME_GUILDS = "入学祝いだけ送るサーバーID"
 KEY_TIMEZONE = "タイムゾーン"
 KEY_IGNORE_BOTS = "Botを対象外にする"
 KEY_SYNC_HOURS = "定期同期間隔(時間)"
@@ -180,6 +181,8 @@ class AppConfig:
     bulk_log_channel_id: int | None
     celebrate_message: str
     welcome_message: str
+    # ロール操作はせず入学祝いだけ送る別サーバー（送信先は各サーバーのシステムチャンネル）
+    welcome_guild_ids: frozenset[int]
     timezone: ZoneInfo
     ignore_bots: bool
     sync_interval_hours: float
@@ -519,6 +522,7 @@ def load_config(path: Path) -> AppConfig:
         welcome_message=_parse_template(
             raw, KEY_WELCOME_MESSAGE, DEFAULT_WELCOME_MESSAGE, WELCOME_SAMPLE
         ),
+        welcome_guild_ids=_parse_id_list(raw, KEY_WELCOME_GUILDS),
         timezone=_parse_timezone(raw),
         ignore_bots=_parse_bool(raw, KEY_IGNORE_BOTS, DEFAULT_IGNORE_BOTS),
         sync_interval_hours=_parse_number(raw, KEY_SYNC_HOURS, DEFAULT_SYNC_HOURS, 0),
